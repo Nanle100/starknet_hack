@@ -3,25 +3,37 @@ use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
 #[starknet::interface]
 pub trait IHelpnet<TContractState> {
     // create campaign
-    fn create_campaign(ref self: TContractState, start_balance: u64, name: ByteArray, target: u64, deadline: u64, description: ByteArray);
+    fn create_campaign(ref self: TContractState, start_balance: u64, name: felt252, target: u64, deadline: u64, description: felt252);
 
     /// Retrieve contract balance.
-    fn pledge(ref self: TContractState, name: ByteArray, amount: u64);
+    fn pledge(ref self: TContractState, name: felt252, amount: u64);
 
     // A pledger changes his mind
-    fn unpledge(ref self: TContractState, name: ByteArray, amount: u64);
+    fn unpledge(ref self: TContractState, name: felt252, amount: u64);
 
     //Refund contributors if the target is not met
-    fn refund(ref self: TContractState, name: ByteArray);
+    fn refund(ref self: TContractState, name: felt252);
 
 
     // withdraw contribution after target are met
-    fn withdraw(ref self: TContractState, name: ByteArray, amount: u64) -> bool;
+    fn withdraw(ref self: TContractState, name: felt252, amount: u64) -> bool;
 
     //view campaign progress
-    fn viewProgress(self: @TContractState, name: ByteArray) -> (creator: ContractAddress, current_balance: u64, target: u64, deadline: u64);
+    fn viewProgress(self: @TContractState, name: felt252) -> campaign ;
 
 }
+
+#[derive(Drop, Copy, Serde, starknet::Store)]
+pub struct campaign {
+     creator: ContractAddress,
+     id: u64,
+     target: u64,
+     start_balance: u64,
+     start_at: u64,
+     deadline: u64,
+     description: felt252,
+     claimed: bool,
+    }
 
 
 #[starknet::contract]
@@ -30,30 +42,32 @@ mod Helpnet {
     use starknet::ContractAddress;
     use super::{get_caller_address, get_block_timestamp};
     use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use super::campaign;
 
 
    #[storage]
    struct Storage {
      id: u64,
      Current_balance: u64,
-     name_id: Map<name: ByteArray, u64>,   
+     name_id: Map<felt252, u64>,   
      campaigns: Map<u64, campaign>,
-     campaign_by_name: Map<name: ByteArray, campaign>,
+     campaign_by_name: Map<felt252, campaign>,
      balances: Map<ContractAddress, u64>,
      num_campaigns: u64,
    }
 
-   // A typical campaign type
-   pub struct campaign {
-    creator: ContractAddress,
-    id: u64,
-    target: u64,
-    start_balance: u64,
-    start_at: u64,
-    deadline: u64,
-    description: ByteArray,
-    claimed: bool,
-   }
+//    // A typical campaign type
+//    #[derive(Drop, Copy, Serde)]
+//    pub struct campaign {
+//     creator: ContractAddress,
+//     id: u64,
+//     target: u64,
+//     start_balance: u64,
+//     start_at: u64,
+//     deadline: u64,
+//     description: felt252,
+//     claimed: bool,
+//    }
 
    #[event]
    #[derive(Drop, starknet::Event)]
@@ -73,12 +87,12 @@ mod Helpnet {
         start_at: u64,
         deadline: u64,
         id: u64,
-        description: ByteArray,
+        description: felt252,
    }
 
    #[derive(Drop, starknet::Event)]
    pub struct place_pledge {
-     name: String,
+     name: felt252,
      pledger: ContractAddress,
      amount: u64,
      balance: u64,
@@ -86,7 +100,7 @@ mod Helpnet {
 
 #[derive(Drop, starknet::Event)]
 pub struct un_pledge {
-     name: String,
+     name: felt252,
      pledger: ContractAddress,
      amount: u64,
      balance: u64,
@@ -94,14 +108,14 @@ pub struct un_pledge {
 
 #[derive(Drop, starknet::Event)]
 pub struct re_fund {
-     name: String,
+     name: felt252,
      amount: u64,
      balance: u64,
 }
 
 #[derive(Drop, starknet::Event)]
 pub struct fund_withdraw{
-     name: String,
+     name: felt252,
      amount: u64,
      from: ContractAddress,
      to: ContractAddress,
@@ -110,18 +124,18 @@ pub struct fund_withdraw{
    #[abi(embed_v0)]
    impl HelpnetImpl of super::IHelpnet<ContractState> {
 
-    fn create_campaign(ref self: ContractState, start_balance: u64, name: String, target: u64, deadline: u64, description: ByteArray) {
+    fn create_campaign(ref self: ContractState, start_balance: u64, name: felt252, target: u64, deadline: u64, description: felt252) {
 
      let start_at: u64 = get_block_timestamp();
      let _deadline: u64 = start_at + deadline;
      let creator = get_caller_address();
 
      let current_id = self.id.read();
-     updated_id = current_id + 1;
+     let updated_id = current_id + 1;
 
      assert(deadline > 0, "invalid duration");
 
-     self.name_id.entry(name).write(updated_id);
+     self.name_id.write(name, updated_id);
    
      self.current_balance.write(current_balance + start_balance);
 
@@ -133,7 +147,7 @@ pub struct fund_withdraw{
                start_at: start_at,
                deadline: _deadline,
                description: description,
-          }
+          };
 
           self.campaigns.write(updated_id, new_campaign);
 
@@ -156,7 +170,7 @@ pub struct fund_withdraw{
     }
 
     /// Retrieve contract balance.
-   fn pledge(ref self: ContractState, name: ByteArray, amount: u64) {
+   fn pledge(ref self: ContractState, name: felt252, amount: u64) {
 
 
       let _campaign: campaign = self.campaign_by_name.entry(name).read();
@@ -184,7 +198,7 @@ pub struct fund_withdraw{
    
 
     // A pledger changes his mind
-    fn unpledge(ref self: ContractState, name: ByteArray, amount: u64) {
+    fn unpledge(ref self: ContractState, name: felt252, amount: u64) {
 
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
 
@@ -208,7 +222,7 @@ pub struct fund_withdraw{
     }
 
     // withdraw contribution after target are met
-    fn withdraw(ref self: ContractState, name: ByteArray, amount: u64, recipient: ContractAddress ) -> bool {
+    fn withdraw(ref self: ContractState, name: felt252, amount: u64, recipient: ContractAddress ) -> bool {
       
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
      let current_time = get_block_timestamp();
@@ -238,45 +252,54 @@ pub struct fund_withdraw{
 
 
     //Refund contributors if the target is not met
-    fn refund(ref self: ContractState, name: ByteArray) {
+    fn refund(ref self: ContractState, name: felt252) {
 
     }
 
     //view campaign progress
-    fn viewProgress(self: @TContractState, name: ByteArray) -> campaign {
+//     fn viewProgress(self: @TContractState, name: ByteArray) -> campaign {
+     
+
+//      let campaign = new_campaign {
+//           creator: _campaign.creator(),
+//           id: _campaign.id(),
+//           target: _campaign.target(),
+//           start_balance: _campaign,
+//           start_at: u64,
+//           deadline: u64,
+//           description: ByteArray,
+//           claimed: bool,
+//      }
+//     }
+
+    fn viewProgress(self: @ContractState, name: felt252) -> campaign {
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
 
      let current_time = get_block_timestamp();
 
      assert(current_time <= _campaign.deadline(), "Campaign ended");
 
-     let campaign = new_campaign {
-          creator: _campaign.creator(),
-          id: _campaign.id(),
-          target: _campaign.target(),
-          start_balance: _campaign,
-          start_at: u64,
-          deadline: u64,
-          description: ByteArray,
-          claimed: bool,
-     }
+     // creator: ContractAddress,
+     // id: u64,
+     // target: u64,
+     // start_balance: u64,
+     // start_at: u64,
+     // deadline: u64,
+     // description: ByteArray,
+     // claimed: bool,
 
-
-
-
-      campaign {
-          creator: ContractAddress,
-          id: u64,
-          target: u64,
-          start_balance: u64,
-          start_at: u64,
-          deadline: u64,
-          description: ByteArray,
-          claimed: bool,
-         }
-
-
+     return  campaign {
+          creator: _campaign.creator,
+         id:  _campaign.id,
+          target:_campaign.target,
+          start_balance: _campaign.start_balance,
+          start_at:_campaign.start_at,
+          deadline:  _campaign.deadline,
+          description:  _campaign.description,
+          claimed:  _campaign._campaign,
+     };
     }
+
 
    
 
