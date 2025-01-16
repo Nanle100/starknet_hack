@@ -16,7 +16,7 @@ pub trait IHelpnet<TContractState> {
 
 
     // withdraw contribution after target are met
-    fn withdraw(ref self: TContractState, name: felt252, amount: u64) -> bool;
+    fn withdraw(ref self: TContractState, name: felt252, amount: u64, recipient: ContractAddress) -> bool;
 
     //view campaign progress
     fn viewProgress(self: @TContractState, name: felt252) -> campaign ;
@@ -41,7 +41,7 @@ mod Helpnet {
     use starknet::storage::{Map};
     use starknet::ContractAddress;
     use super::{get_caller_address, get_block_timestamp};
-    use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
+    use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess, StoragePathEntry};
     use super::campaign;
 
 
@@ -133,31 +133,34 @@ pub struct fund_withdraw{
      let current_id = self.id.read();
      let updated_id = current_id + 1;
 
-     assert(deadline > 0, "invalid duration");
+     assert(deadline > 0, 'invalid duration');
 
-     self.name_id.write(name, updated_id);
+    // self.name_id.write(name, updated_id);
+     self.name_id.entry(name).write(updated_id);
    
-     self.current_balance.write(current_balance + start_balance);
+     self.Current_balance.write(self.Current_balance.read() + start_balance);
 
           
-          let new_campaign = campaign {
+          let _new_campaign = campaign {
                creator: creator,
                target: target,
-               start_balance: u64,
+               start_balance: start_balance,
                start_at: start_at,
                deadline: _deadline,
+               id: updated_id,
                description: description,
+               claimed: false,
           };
 
-          self.campaigns.write(updated_id, new_campaign);
+          self.campaigns.entry(updated_id).write(_new_campaign);
 
-          self.campaign_by_name.write(name, new_campaign);
+          self.campaign_by_name.entry(name).write(_new_campaign);
 
-         self.num_campaigns.write(num_campaigns + 1);
+         self.num_campaigns.write(self.num_campaigns.read() + 1);
 
          self.balances.entry(creator).write(start_balance);
 
-         self.current_balance.write(current_balance + start_balance);
+         self.Current_balance.write(self.Current_balance.read() + start_balance);
 
          self.emit(createCampaign { creator: creator,
           target: target,
@@ -177,15 +180,12 @@ pub struct fund_withdraw{
  
       let current_time = get_block_timestamp();
 
-      let pledger_balance = self.balances.entry(get_caller_address()).read();   
-
-          assert(pledger_balance >= amount, "Insufficient funds");
-          assert(current_time < _campaign.deadline(), "Campaign ended");
-          assert(current_time >=  _campaign.start_at(), "Campaign not started");
+          assert(current_time < _campaign.deadline, 'Campaign ended');
+          assert(current_time >=  _campaign.start_at, 'Campaign not started');
 
           // updating the balance
-          self.Current_balances.write(Current_balance + amount);
-          let updated_balance: u64 = self.Current_balances.read();
+          self.Current_balance.write(self.Current_balance.read() + amount);
+          let updated_balance: u64 = self.Current_balance.read();
 
           //keeping track of users and their pledges
           self.balances.entry(get_caller_address()).write(amount);
@@ -206,12 +206,12 @@ pub struct fund_withdraw{
 
      let pledger_balance = self.balances.entry(get_caller_address()).read();   
 
-          assert(pledger_balance >= amount, "Insufficient funds");
-          assert(current_time < _campaign.deadline(), "Campaign ended");
+          assert(pledger_balance >= amount, 'Insufficient funds');
+          assert(current_time < _campaign.deadline, 'Campaign ended');
 
     
       // updating the balance
-      self.Current_balance.write(Current_balance - amount);
+      self.Current_balance.write(self.Current_balance.read() - amount);
       let updated_balance: u64 = self.Current_balance.read();
 
       self.emit(un_pledge {  name: name,
@@ -226,33 +226,44 @@ pub struct fund_withdraw{
       
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
      let current_time = get_block_timestamp();
-     let creator_balance = self.balances.entry(get_caller_address()).read();  
+     let creator_address = _campaign.creator;  
      let withdrawer = get_caller_address(); 
-     let recipient_balance = self.balances.entry(recipient).read();
 
-     assert(creator_balance = _campaign.creator(), "Not the creator");
-     assert(current_time >= _campaign.deadline, "Campaign is not ended");
-     assert(withdrawer = _campaign.creator(), "Withdrawer is not creator");  
+     
 
-     self.balances.entry(sender).write(sender_balance - amount);
-     self.balances.entry(recipient).write(recipient_balance + amount);
+     assert(creator_address == withdrawer, 'Not the creator');
+     assert(current_time >= _campaign.deadline, 'Campaign is not ended');
 
-     self.Current_balance.write(Current_balance - amount);
+     let _creator_amount = self.balances.entry(creator_address).read();
+     let _recipient_amount = self.balances.entry(recipient).read();
+
+     let current_amount = _creator_amount - amount;
+
+     self.Current_balance.write(self.Current_balance.read() - amount);
+
+    // self.balances.entry(recipient).write(self.balances.);
+     self.balances.entry(creator_address).write(current_amount);
+     
+     self.balances.entry(recipient).write(_recipient_amount + amount);
+
+     self.Current_balance.write(self.Current_balance.read() - amount);
 
      self.emit(fund_withdraw {
           name: name,
           amount: amount,
-          from: _campaign.creator(),
+          from: _campaign.creator,
           to: recipient,
      });
 
-     _campaign.claimed
+     _campaign.claimed;
+     true
 
     }
 
 
     //Refund contributors if the target is not met
     fn refund(ref self: ContractState, name: felt252) {
+          
 
     }
 
