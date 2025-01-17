@@ -3,20 +3,20 @@ use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
 #[starknet::interface]
 pub trait IHelpnet<TContractState> {
     // create campaign
-    fn create_campaign(ref self: TContractState, start_balance: u64, name: felt252, target: u64, deadline: u64, description: felt252);
+    fn create_campaign(ref self: TContractState, start_balance: u128, name: felt252, target: u128, deadline: u64, description: felt252);
 
     /// Retrieve contract balance.
-    fn pledge(ref self: TContractState, name: felt252, amount: u64);
+    fn pledge(ref self: TContractState, name: felt252, amount: u128);
 
     // A pledger changes his mind
-    fn unpledge(ref self: TContractState, name: felt252, amount: u64);
+    fn unpledge(ref self: TContractState, name: felt252, amount: u128);
 
     //Refund contributors if the target is not met
     fn refund(ref self: TContractState, name: felt252);
 
 
     // withdraw contribution after target are met
-    fn withdraw(ref self: TContractState, name: felt252, amount: u64, recipient: ContractAddress) -> bool;
+    fn withdraw(ref self: TContractState, name: felt252, amount: u128, recipient: ContractAddress);
 
     //view campaign progress
     fn viewProgress(self: @TContractState, name: felt252) -> campaign ;
@@ -26,48 +26,41 @@ pub trait IHelpnet<TContractState> {
 #[derive(Drop, Copy, Serde, starknet::Store)]
 pub struct campaign {
      creator: ContractAddress,
-     id: u64,
-     target: u64,
-     start_balance: u64,
+     id: u128,
+     target: u128,
+     start_balance: u128,
      start_at: u64,
      deadline: u64,
      description: felt252,
-     claimed: bool,
     }
 
 
 #[starknet::contract]
 mod Helpnet {
+    use super::ERC20Trait;
     use starknet::storage::{Map};
     use starknet::ContractAddress;
     use super::{get_caller_address, get_block_timestamp};
     use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess, StoragePathEntry};
     use super::campaign;
+     use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    // use openzeppelin::token::erc20::interface;
 
 
+ 
    #[storage]
    struct Storage {
-     id: u64,
-     Current_balance: u64,
-     name_id: Map<felt252, u64>,   
-     campaigns: Map<u64, campaign>,
+     id: u128,
+     Current_balance: u128,
+     name_id: Map<felt252, u128>,   
+     campaigns: Map<u128, campaign>,
      campaign_by_name: Map<felt252, campaign>,
-     balances: Map<ContractAddress, u64>,
-     num_campaigns: u64,
+     balances: Map<ContractAddress, u128>,
+     num_campaigns: u128,
+    
+     
    }
 
-//    // A typical campaign type
-//    #[derive(Drop, Copy, Serde)]
-//    pub struct campaign {
-//     creator: ContractAddress,
-//     id: u64,
-//     target: u64,
-//     start_balance: u64,
-//     start_at: u64,
-//     deadline: u64,
-//     description: felt252,
-//     claimed: bool,
-//    }
 
    #[event]
    #[derive(Drop, starknet::Event)]
@@ -82,11 +75,11 @@ mod Helpnet {
    #[derive(Drop, starknet::Event)]
    pub struct createCampaign{
         creator: ContractAddress,
-        target: u64,
-        start_balance: u64,
+        target: u128,
+        start_balance: u128,
         start_at: u64,
         deadline: u64,
-        id: u64,
+        id: u128,
         description: felt252,
    }
 
@@ -94,40 +87,43 @@ mod Helpnet {
    pub struct place_pledge {
      name: felt252,
      pledger: ContractAddress,
-     amount: u64,
-     balance: u64,
+     amount: u128,
+     balance: u128,
    }
 
 #[derive(Drop, starknet::Event)]
 pub struct un_pledge {
      name: felt252,
      pledger: ContractAddress,
-     amount: u64,
-     balance: u64,
+     amount: u128,
+     balance: u128,
 }
 
 #[derive(Drop, starknet::Event)]
 pub struct re_fund {
      name: felt252,
-     amount: u64,
-     balance: u64,
+     amount: u128,
+     to: ContractAddress,
+     balance: u128,
 }
 
 #[derive(Drop, starknet::Event)]
 pub struct fund_withdraw{
      name: felt252,
-     amount: u64,
+     amount: u128,
      from: ContractAddress,
      to: ContractAddress,
 }
 
+
+
    #[abi(embed_v0)]
    impl HelpnetImpl of super::IHelpnet<ContractState> {
 
-    fn create_campaign(ref self: ContractState, start_balance: u64, name: felt252, target: u64, deadline: u64, description: felt252) {
+    fn create_campaign(ref self: ContractState, start_balance: u128, name: felt252, target: u128, deadline: u64, description: felt252) {
 
-     let start_at: u64 = get_block_timestamp();
-     let _deadline: u64 = start_at + deadline;
+     let start_at = get_block_timestamp();
+     let _deadline = start_at + deadline;
      let creator = get_caller_address();
 
      let current_id = self.id.read();
@@ -149,7 +145,6 @@ pub struct fund_withdraw{
                deadline: _deadline,
                id: updated_id,
                description: description,
-               claimed: false,
           };
 
           self.campaigns.entry(updated_id).write(_new_campaign);
@@ -161,6 +156,8 @@ pub struct fund_withdraw{
          self.balances.entry(creator).write(start_balance);
 
          self.Current_balance.write(self.Current_balance.read() + start_balance);
+         //transfer from start balance to creator
+         self._transfer(creator, start_balance);
 
          self.emit(createCampaign { creator: creator,
           target: target,
@@ -173,56 +170,67 @@ pub struct fund_withdraw{
     }
 
     /// Retrieve contract balance.
-   fn pledge(ref self: ContractState, name: felt252, amount: u64) {
+   fn pledge(ref self: ContractState, name: felt252, amount: u128) {
 
 
       let _campaign: campaign = self.campaign_by_name.entry(name).read();
  
       let current_time = get_block_timestamp();
+      let _pledger = get_caller_address();
+      
 
           assert(current_time < _campaign.deadline, 'Campaign ended');
           assert(current_time >=  _campaign.start_at, 'Campaign not started');
 
           // updating the balance
           self.Current_balance.write(self.Current_balance.read() + amount);
-          let updated_balance: u64 = self.Current_balance.read();
+          let updated_balance: u128 = self.Current_balance.read();
 
           //keeping track of users and their pledges
           self.balances.entry(get_caller_address()).write(amount);
 
+          // transfer funds
+          self._transfer_from(_pledger,_campaign.creator, amount);
+
           self.emit(place_pledge {  name: name,
                amount: amount,
-               pledger: get_caller_address(),
+               pledger: _pledger,
                balance: updated_balance,});
     }
    
 
     // A pledger changes his mind
-    fn unpledge(ref self: ContractState, name: felt252, amount: u64) {
+    fn unpledge(ref self: ContractState, name: felt252, amount: u128) {
 
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
 
      let current_time = get_block_timestamp();
 
-     let pledger_balance = self.balances.entry(get_caller_address()).read();   
+     let _unpledger = get_caller_address();
 
-          assert(pledger_balance >= amount, 'Insufficient funds');
+     let pledger_balance = self.balances.entry(_unpledger).read();   
+
+         
           assert(current_time < _campaign.deadline, 'Campaign ended');
+          assert(amount <= pledger_balance, 'Insufficient funds');
+        
+          self._transfer_from(_campaign.creator, _unpledger, amount);
 
-    
       // updating the balance
       self.Current_balance.write(self.Current_balance.read() - amount);
-      let updated_balance: u64 = self.Current_balance.read();
+      let updated_balance: u128 = self.Current_balance.read();
+
+
 
       self.emit(un_pledge {  name: name,
           amount: amount,
-          pledger: get_caller_address(),
+          pledger: _unpledger,
           balance: updated_balance,});
         
     }
 
     // withdraw contribution after target are met
-    fn withdraw(ref self: ContractState, name: felt252, amount: u64, recipient: ContractAddress ) -> bool {
+    fn withdraw(ref self: ContractState, name: felt252, amount: u128, recipient: ContractAddress ) {
       
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
      let current_time = get_block_timestamp();
@@ -248,77 +256,93 @@ pub struct fund_withdraw{
 
      self.Current_balance.write(self.Current_balance.read() - amount);
 
+     self._transfer_from(creator_address, recipient, amount);
+
      self.emit(fund_withdraw {
           name: name,
           amount: amount,
-          from: _campaign.creator,
+          from: creator_address,
           to: recipient,
      });
 
-     _campaign.claimed;
-     true
-
+     
     }
 
 
     //Refund contributors if the target is not met
     fn refund(ref self: ContractState, name: felt252) {
-          
+          let _campaign: campaign = self.campaign_by_name.entry(name).read();
+          let _caller = get_caller_address();
+          let current_time = get_block_timestamp();
+          let creator_address = _campaign.creator;  
 
+
+
+          let _pledgeramount = self.balances.entry(_caller).read();
+
+          let _balance = self.Current_balance.read() - _pledgeramount;
+
+          // assert(_caller == _campaign.creator, 'Not the creator');
+          assert(current_time >= _campaign.deadline, 'Campaign is still active');
+
+        self._transfer_from(creator_address, _caller, _pledgeramount);
+
+        self.Current_balance.write(_balance);
+
+
+          self.emit(re_fund {
+            name: name,
+            amount: _pledgeramount,
+            to: _caller,
+            balance: _balance,
+       });
+     
     }
 
-    //view campaign progress
-//     fn viewProgress(self: @TContractState, name: ByteArray) -> campaign {
-     
 
-//      let campaign = new_campaign {
-//           creator: _campaign.creator(),
-//           id: _campaign.id(),
-//           target: _campaign.target(),
-//           start_balance: _campaign,
-//           start_at: u64,
-//           deadline: u64,
-//           description: ByteArray,
-//           claimed: bool,
-//      }
-//     }
 
     fn viewProgress(self: @ContractState, name: felt252) -> campaign {
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
-
-     let current_time = get_block_timestamp();
-
-     assert(current_time <= _campaign.deadline(), "Campaign ended");
-
-     // creator: ContractAddress,
-     // id: u64,
-     // target: u64,
-     // start_balance: u64,
-     // start_at: u64,
-     // deadline: u64,
-     // description: ByteArray,
-     // claimed: bool,
-
-     return  campaign {
+     
+     let check = campaign {
           creator: _campaign.creator,
-         id:  _campaign.id,
-          target:_campaign.target,
-          start_balance: _campaign.start_balance,
-          start_at:_campaign.start_at,
-          deadline:  _campaign.deadline,
-          description:  _campaign.description,
-          claimed:  _campaign._campaign,
+         id: _campaign.id,
+        target: _campaign.target,
+        start_balance: _campaign.start_balance,
+       start_at: _campaign.start_at,
+       deadline: _campaign.deadline,
+       description: _campaign.description,
      };
+
+     check
+
+    
     }
-
-
-   
-
 
    }
 
+}
 
 
 
+#[generate_trait]
+impl ERC20Impl of ERC20Trait {
+    fn _transfer_from(ref self: ContractState, sender: ContractAddress, recipient: ContractAddress, amount: u128) {
+        let eth_dispatcher = IERC20Dispatcher {
+            contract_address: contract_address_const::<0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d>() // STRK token Contract Address
+        };
+        assert(eth_dispatcher.balance_of(sender) >= amount.into(), 'insufficient funds');
 
+        // eth_dispatcher.approve(validator_contract_address, amount.into()); This is wrong as it is the validator contract trying to approve itself
+        let success = eth_dispatcher.transfer_from(sender, recipient, amount.into());
+        assert(success, 'ERC20 transfer_from fail!');
+    }
+
+    fn _transfer(ref self: ContractState, recipient: ContractAddress, amount: u128) {
+        let eth_dispatcher = IERC20Dispatcher {
+            contract_address: contract_address_const::<0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d>() // STRK token Contract Address
+        };
+        let success = eth_dispatcher.transfer(recipient, amount.into());
+        assert(success, 'ERC20 transfer fail!');
+    }
 }
