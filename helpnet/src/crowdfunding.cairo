@@ -1,4 +1,4 @@
-use starknet::{ContractAddress, get_caller_address, get_block_timestamp};
+use starknet::{ContractAddress, get_caller_address, get_block_timestamp, contract_address_const, get_contract_address};
 
 #[starknet::interface]
 pub trait IHelpnet<TContractState> {
@@ -37,14 +37,12 @@ pub struct campaign {
 
 #[starknet::contract]
 mod Helpnet {
-    use super::ERC20Trait;
     use starknet::storage::{Map};
     use starknet::ContractAddress;
-    use super::{get_caller_address, get_block_timestamp};
+    use super::{get_caller_address, get_block_timestamp, contract_address_const, get_contract_address};
     use core::starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess, StoragePathEntry};
     use super::campaign;
      use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-    // use openzeppelin::token::erc20::interface;
 
 
  
@@ -125,6 +123,8 @@ pub struct fund_withdraw{
      let start_at = get_block_timestamp();
      let _deadline = start_at + deadline;
      let creator = get_caller_address();
+     let campaign_contract_address = get_contract_address();
+     let campaign_balance = self.Current_balance.read();
 
      let current_id = self.id.read();
      let updated_id = current_id + 1;
@@ -154,6 +154,7 @@ pub struct fund_withdraw{
          self.num_campaigns.write(self.num_campaigns.read() + 1);
 
          self.balances.entry(creator).write(start_balance);
+         self.balances.entry(campaign_contract_address).write(campaign_balance);
 
          self.Current_balance.write(self.Current_balance.read() + start_balance);
          //transfer from start balance to creator
@@ -174,6 +175,8 @@ pub struct fund_withdraw{
 
 
       let _campaign: campaign = self.campaign_by_name.entry(name).read();
+      let campaign_contract_address = get_contract_address();
+     // let campaign_balance = self.Current_balance.read();
  
       let current_time = get_block_timestamp();
       let _pledger = get_caller_address();
@@ -190,7 +193,7 @@ pub struct fund_withdraw{
           self.balances.entry(get_caller_address()).write(amount);
 
           // transfer funds
-          self._transfer_from(_pledger,_campaign.creator, amount);
+          self._transfer_from(_pledger,campaign_contract_address, amount);
 
           self.emit(place_pledge {  name: name,
                amount: amount,
@@ -203,6 +206,7 @@ pub struct fund_withdraw{
     fn unpledge(ref self: ContractState, name: felt252, amount: u128) {
 
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
+     let campaign_contract_address = get_contract_address();
 
      let current_time = get_block_timestamp();
 
@@ -214,7 +218,7 @@ pub struct fund_withdraw{
           assert(current_time < _campaign.deadline, 'Campaign ended');
           assert(amount <= pledger_balance, 'Insufficient funds');
         
-          self._transfer_from(_campaign.creator, _unpledger, amount);
+          self._transfer_from(campaign_contract_address, _unpledger, amount);
 
       // updating the balance
       self.Current_balance.write(self.Current_balance.read() - amount);
@@ -233,35 +237,38 @@ pub struct fund_withdraw{
     fn withdraw(ref self: ContractState, name: felt252, amount: u128, recipient: ContractAddress ) {
       
      let _campaign: campaign = self.campaign_by_name.entry(name).read();
+     let campaign_contract_address = get_contract_address();
+    // let campaign_balance = self.Current_balance.read();
+
      let current_time = get_block_timestamp();
-     let creator_address = _campaign.creator;  
+     
      let withdrawer = get_caller_address(); 
 
      
 
-     assert(creator_address == withdrawer, 'Not the creator');
+     assert(campaign_contract_address == withdrawer, 'Not authorized');
      assert(current_time >= _campaign.deadline, 'Campaign is not ended');
 
-     let _creator_amount = self.balances.entry(creator_address).read();
+     let campaign_balance = self.balances.entry(campaign_contract_address).read();
      let _recipient_amount = self.balances.entry(recipient).read();
 
-     let current_amount = _creator_amount - amount;
+     let current_amount = campaign_balance - amount;
 
      self.Current_balance.write(self.Current_balance.read() - amount);
 
     // self.balances.entry(recipient).write(self.balances.);
-     self.balances.entry(creator_address).write(current_amount);
+     self.balances.entry(campaign_contract_address).write(current_amount);
      
      self.balances.entry(recipient).write(_recipient_amount + amount);
 
      self.Current_balance.write(self.Current_balance.read() - amount);
 
-     self._transfer_from(creator_address, recipient, amount);
+     self._transfer_from(campaign_contract_address, recipient, amount);
 
      self.emit(fund_withdraw {
           name: name,
           amount: amount,
-          from: creator_address,
+          from: campaign_contract_address,
           to: recipient,
      });
 
@@ -272,9 +279,11 @@ pub struct fund_withdraw{
     //Refund contributors if the target is not met
     fn refund(ref self: ContractState, name: felt252) {
           let _campaign: campaign = self.campaign_by_name.entry(name).read();
+          let campaign_contract_address = get_contract_address();
+
           let _caller = get_caller_address();
           let current_time = get_block_timestamp();
-          let creator_address = _campaign.creator;  
+          //let creator_address = _campaign.creator;  
 
 
 
@@ -285,7 +294,7 @@ pub struct fund_withdraw{
           // assert(_caller == _campaign.creator, 'Not the creator');
           assert(current_time >= _campaign.deadline, 'Campaign is still active');
 
-        self._transfer_from(creator_address, _caller, _pledgeramount);
+        self._transfer_from(campaign_contract_address, _caller, _pledgeramount);
 
         self.Current_balance.write(_balance);
 
@@ -321,15 +330,16 @@ pub struct fund_withdraw{
 
    }
 
-}
 
 
 
-#[generate_trait]
+
+#[generate_trait]            
 impl ERC20Impl of ERC20Trait {
+    
     fn _transfer_from(ref self: ContractState, sender: ContractAddress, recipient: ContractAddress, amount: u128) {
         let eth_dispatcher = IERC20Dispatcher {
-            contract_address: contract_address_const::<0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d>() // STRK token Contract Address
+            contract_address: contract_address_const::<0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7>() // STRK token Contract Address
         };
         assert(eth_dispatcher.balance_of(sender) >= amount.into(), 'insufficient funds');
 
@@ -340,9 +350,11 @@ impl ERC20Impl of ERC20Trait {
 
     fn _transfer(ref self: ContractState, recipient: ContractAddress, amount: u128) {
         let eth_dispatcher = IERC20Dispatcher {
-            contract_address: contract_address_const::<0x04718f5a0fc34cc1af16a1cdee98ffb20c31f5cd61d6ab07201858f4287c938d>() // STRK token Contract Address
+            contract_address: contract_address_const::<0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7>() // STRK token Contract Address
         };
         let success = eth_dispatcher.transfer(recipient, amount.into());
         assert(success, 'ERC20 transfer fail!');
     }
 }
+}
+

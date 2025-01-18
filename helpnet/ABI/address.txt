@@ -1,0 +1,5 @@
+Deploying class = 0x003704cedf1eefac82833fe6f743e2f9962bef871d21d58f90ec4d9e9bb89fb7
+
+address = 0x07b6cd521c5dd4fa6e212970a68bb32190754c1cf1944850a2cc3f0e9aa2c7a0
+
+transaction hash = 0x0562c6d1d492b02630d4bb9e26942aee6ec1eecbef5bf26790a96ed29dee1cef
