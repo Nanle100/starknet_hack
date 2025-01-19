@@ -5,9 +5,7 @@ account0_keystore.json
 
 account0_account.json
 
-starkli declare target/dev/helpnet_HelloStarknet.contract_class.json --rpc https://free-rpc.nethermind.io/sepolia-juno --account account0_account.json --keystore account0_keystore.json
-
-starkli deploy 0x003704cedf1eefac82833fe6f743e2f9962bef871d21d58f90ec4d9e9bb89fb7 --rpc https://free-rpc.nethermind.io/sepolia-juno --account account0_account.json --keystore account0_keystore.json
+starkli declare target/dev/helpnet_Helpnet.contract_class.json --rpc https://free-rpc.nethermind.io/sepolia-juno --account account0_account.json --keystore account0_keystore.json
 
 
-Contract deployed: 0x07b6cd521c5dd4fa6e212970a68bb32190754c1cf1944850a2cc3f0e9aa2c7a0
+starkli deploy 0x013bab9d0e6e3cfc2661d70cea43b0b508c69c9962f4200ff14149e5181681bd --rpc https://free-rpc.nethermind.io/sepolia-juno --account account0_account.json --keystore account0_keystore.json

@@ -19,7 +19,11 @@ pub trait IHelpnet<TContractState> {
     fn withdraw(ref self: TContractState, name: felt252, amount: u128, recipient: ContractAddress);
 
     //view campaign progress
-    fn viewProgress(self: @TContractState, name: felt252) -> campaign ;
+    fn viewProgress(self: @TContractState, name: felt252) -> campaign;
+
+    fn view_campaigns(self: @TContractState) -> Array<campaign>;
+
+    fn creators_campaigns(self: @TContractState) -> Array<campaign>;
 
 }
 
@@ -48,12 +52,15 @@ mod Helpnet {
  
    #[storage]
    struct Storage {
-     id: u128,
-     Current_balance: u128,
-     name_id: Map<felt252, u128>,   
-     campaigns: Map<u128, campaign>,
-     campaign_by_name: Map<felt252, campaign>,
-     balances: Map<ContractAddress, u128>,
+     id: u128,                      // campaign id
+     Current_balance: u128,            
+     name_id: Map<felt252, u128>,         // name of campaign => id
+     campaigns: Map<u128, campaign>,       // campaign id => campaign struct
+
+     creator_campaigns: Map<ContractAddress, campaign>,
+
+     campaign_by_name: Map<felt252, campaign>,    // campaign name => campaign struct
+     balances: Map<ContractAddress, u128>,         // A pledger address
      num_campaigns: u128,
     
      
@@ -146,6 +153,8 @@ pub struct fund_withdraw{
                id: updated_id,
                description: description,
           };
+
+          self.creator_campaigns.entry(creator).write(_new_campaign);
 
           self.campaigns.entry(updated_id).write(_new_campaign);
 
@@ -328,6 +337,40 @@ pub struct fund_withdraw{
     
     }
 
+
+    fn view_campaigns(self: @ContractState) -> Array<campaign> {
+     let mut _campaigns = ArrayTrait::new();
+
+     let mut i = 1;
+     let count = self.id.read();
+
+     while i <= count {
+          let campaign = self.campaigns.entry(i).read();
+          _campaigns.append(campaign);
+
+          i += 1;
+      };
+
+      _campaigns
+
+    }
+
+
+    fn creators_campaigns(self: @ContractState) -> Array<campaign> {
+     let mut _campaigns = ArrayTrait::new();
+
+
+     let caller = get_caller_address();
+     let campaign = self.creator_campaigns.entry(caller).read();
+
+     _campaigns.append(campaign);
+
+     _campaigns
+          
+    }
+     
+
+
    }
 
 
@@ -357,4 +400,6 @@ impl ERC20Impl of ERC20Trait {
     }
 }
 }
+
+
 
